@@ -1,0 +1,51 @@
+[package]
+name = "ThinkMate"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Vincent Hanquez <vincent@coretype.io>"]
+homepage = "https://github.com/vincenthz/ThinkMate/"
+repository = "https://github.com/vincenthz/ThinkMate/"
+keywords = [ "AI", "Ollama", "Frontend" ]
+categories = [ "ui" ]
+rust-version = "1.78"
+
+[dependencies]
+iced = { version = "0.13", features = [
+    "tokio",
+    "svg",
+    "system",
+    "web-colors",
+    "image",
+    "advanced",
+    "fira-sans",
+] }
+iced_aw = { version = "0.11", default-features = false, features = ["spinner"] }
+iced_fonts = { version = "0.1", features = ["bootstrap", "nerd"] }
+palette = "0.7"
+
+ollama-rs = { version = "0.2.4", features = ["stream"] }
+chrono = "*"
+anyhow = "1"
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1" }
+ulid = { version = "1", features = ["serde"] }
+url = "2.5"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[package.metadata.bundle]
+name = "ThinkMate"
+identifier = "io.coretype.thinkmate"
+icon = []
+version = "1.0"
+category = "Utilities"
+short_description = "Assistant UI for AI models"
+long_description = """
+Application to use AI models easily
+"""
+
+[profile.release]
+debug = true
