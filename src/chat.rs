@@ -25,26 +25,6 @@ pub enum ChatState {
     },
 }
 
-pub struct ChatOutput {
-    output: String,
-}
-
-impl ChatOutput {
-    pub fn new() -> Self {
-        Self {
-            output: String::new(),
-        }
-    }
-
-    pub fn view(&self) -> Container<Message> {
-        container(text(&self.output))
-    }
-
-    pub fn add_content(&mut self, response: api::ChatMessageResponse) {
-        self.output.push_str(&response.message.content)
-    }
-}
-
 impl Chat {
     pub fn new(model: api::LocalModel) -> Self {
         Self {
@@ -170,5 +150,25 @@ impl Chat {
                 ended_at: _,
             } => output.add_content(response),
         }
+    }
+}
+
+pub struct ChatOutput {
+    output: String,
+}
+
+impl ChatOutput {
+    pub fn new() -> Self {
+        Self {
+            output: String::new(),
+        }
+    }
+
+    pub fn view(&self) -> Container<Message> {
+        container(text(&self.output))
+    }
+
+    pub fn add_content(&mut self, response: api::ChatMessageResponse) {
+        self.output.push_str(&response.message.content)
     }
 }
