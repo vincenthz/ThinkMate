@@ -151,10 +151,11 @@ impl ThinkMate {
             Message::ChatSend => {
                 let chat = &mut self.main.tabs[self.main.chat_view];
                 let ulid = chat.ulid.clone();
+                let model = chat.model.name().clone();
                 let prompt = chat.set_generating().to_string();
                 let config = &self.ollama_config.clone();
                 let api = config.instance();
-                Task::perform(api::chat_stream(api, prompt), move |stream| {
+                Task::perform(api::chat_stream(api, model, prompt), move |stream| {
                     Message::ChatStreamStart(ulid, stream)
                 })
             }
@@ -438,7 +439,6 @@ impl Main {
 
 pub struct Chat {
     ulid: Ulid,
-    #[allow(unused)]
     model: api::LocalModel,
     state: ChatState,
 }

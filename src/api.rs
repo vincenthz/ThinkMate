@@ -58,13 +58,19 @@ impl PartialEq for LocalModel {
     }
 }
 
+impl Eq for LocalModel {}
+
 impl std::fmt::Display for LocalModel {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0.name)
     }
 }
 
-impl Eq for LocalModel {}
+impl LocalModel {
+    pub fn name(&self) -> &String {
+        &self.0.name
+    }
+}
 
 pub struct ConnectionFailed;
 
@@ -75,10 +81,10 @@ pub async fn get_model_lists(api: &Ollama) -> Result<Vec<LocalModel>, Connection
         .map_err(|_| ConnectionFailed)
 }
 
-pub async fn chat_stream(api: Ollama, prompt: String) -> ChatMessageResponseStream {
+pub async fn chat_stream(api: Ollama, model: String, prompt: String) -> ChatMessageResponseStream {
     let stream = api
         .send_chat_messages_stream(ChatMessageRequest::new(
-            "deepseek-r1:32b".to_string(),
+            model,
             vec![ChatMessage::user(prompt)],
         ))
         .await
