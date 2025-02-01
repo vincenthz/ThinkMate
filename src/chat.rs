@@ -1,8 +1,11 @@
-use std::time::{Duration, SystemTime};
+use std::{
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 
 use chrono::{DateTime, Local};
 use iced::{
-    widget::{column, container, row, scrollable, text, text_editor, Container},
+    widget::{column, container, rich_text, row, scrollable, span, text, text_editor, Container},
     Color, Element, Length, Padding,
 };
 use ulid::Ulid;
@@ -153,22 +156,172 @@ impl Chat {
     }
 }
 
+pub enum OutputMode {
+    Text,
+    Code(String),
+}
+
 pub struct ChatOutput {
-    output: String,
+    stream: MarkdownIncremental,
+    output: Vec<Chunk>,
 }
 
 impl ChatOutput {
     pub fn new() -> Self {
         Self {
-            output: String::new(),
+            stream: MarkdownIncremental::new(),
+            output: vec![],
         }
     }
 
+    fn unparsed(&self) -> &str {
+        &self.stream.buf[self.stream.pos..]
+    }
+
     pub fn view(&self) -> Container<Message> {
-        container(text(&self.output))
+        let rem = std::iter::once(text(self.unparsed()).into());
+        container(column(self.output.iter().map(|c| c.view()).chain(rem)).spacing(20.0))
     }
 
     pub fn add_content(&mut self, response: api::ChatMessageResponse) {
-        self.output.push_str(&response.message.content)
+        let msg = &response.message;
+        //println!("adding content: {:?} \"{}\"", msg.role, msg.content);
+
+        self.stream.add_content(&msg.content);
+        match self.stream.process_content() {
+            None => {}
+            Some(Content::Code(s)) => self.output.push(Chunk::new_code(s)),
+            Some(Content::Normal(s)) => self.output.push(Chunk::new(s)),
+        }
+    }
+}
+
+pub struct Chunk {
+    raw_content: Arc<String>,
+    output_mode: OutputMode,
+}
+
+impl Chunk {
+    pub fn new(raw_content: String) -> Self {
+        Self {
+            raw_content: Arc::new(raw_content),
+            output_mode: OutputMode::Text,
+        }
+    }
+
+    pub fn new_code(raw_content: String) -> Self {
+        if let Some((code_type, content)) = raw_content.split_once("\n") {
+            Self {
+                raw_content: Arc::new(content.to_string()),
+                output_mode: OutputMode::Code(code_type.to_string()),
+            }
+        } else {
+            Self {
+                raw_content: Arc::new(raw_content),
+                output_mode: OutputMode::Code(String::new()),
+            }
+        }
+    }
+
+    pub fn view<'a>(&'a self) -> Element<'a, Message> {
+        match &self.output_mode {
+            OutputMode::Text => rich_text([span(self.raw_content.as_str())]).into(),
+            OutputMode::Code(_code_type) => row![]
+                .push(
+                    button_icon(iced_fonts::Bootstrap::Clipboard)
+                        .on_press(Message::CopyClipboard(self.raw_content.clone())),
+                )
+                .push(container(
+                    container(rich_text([
+                        span(self.raw_content.as_str()).font(iced::Font::MONOSPACE)
+                    ]))
+                    .padding(5.0)
+                    .style(|theme| container::bordered_box(theme)),
+                ))
+                .spacing(10.0)
+                .into(),
+        }
+    }
+}
+
+pub struct MarkdownIncremental {
+    context: MarkdownContext,
+    buf: String,
+    pos: usize,
+}
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub enum MarkdownContext {
+    Normal,
+    Code,
+}
+
+enum Content {
+    Code(String),
+    Normal(String),
+}
+
+enum ContentFound {
+    NewParagraph(usize),
+    CodeSyntax(usize),
+}
+
+impl MarkdownIncremental {
+    pub fn new() -> Self {
+        Self {
+            context: MarkdownContext::Normal,
+            buf: String::new(),
+            pos: 0,
+        }
+    }
+
+    pub fn add_content(&mut self, s: &str) {
+        self.buf.push_str(s);
+    }
+
+    fn process_content(&mut self) -> Option<Content> {
+        let remaining = &self.buf[self.pos..];
+        match self.context {
+            MarkdownContext::Normal => match next_chunk(remaining) {
+                None => None,
+                Some(ContentFound::NewParagraph(idx)) => {
+                    let s = &self.buf[self.pos..self.pos + idx];
+                    self.pos += idx + 2;
+                    Some(Content::Normal(s.to_string()))
+                }
+                Some(ContentFound::CodeSyntax(idx)) => {
+                    let s = &self.buf[self.pos..self.pos + idx];
+                    self.pos += idx + 3;
+                    self.context = MarkdownContext::Code;
+                    Some(Content::Normal(s.to_string()))
+                }
+            },
+            MarkdownContext::Code => match remaining.find("```") {
+                None => None,
+                Some(idx) => {
+                    let s = &self.buf[self.pos..self.pos + idx];
+                    self.pos += idx + 3;
+                    self.context = MarkdownContext::Normal;
+                    Some(Content::Code(s.to_string()))
+                }
+            },
+        }
+    }
+}
+
+fn next_chunk(s: &str) -> Option<ContentFound> {
+    let z1 = s.find("```");
+    let z2 = s.find("\n\n");
+    match (z1, z2) {
+        (Some(z1), Some(z2)) => {
+            if z1 < z2 {
+                Some(ContentFound::CodeSyntax(z1))
+            } else {
+                Some(ContentFound::NewParagraph(z2))
+            }
+        }
+        (Some(z1), None) => Some(ContentFound::CodeSyntax(z1)),
+        (None, Some(z2)) => Some(ContentFound::NewParagraph(z2)),
+        (None, None) => None,
     }
 }

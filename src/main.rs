@@ -15,6 +15,7 @@ use iced::futures::channel::mpsc;
 use iced::futures::{SinkExt, Stream, StreamExt};
 use iced::stream;
 use sidebar::Sidebar;
+use std::sync::Arc;
 use ulid::Ulid;
 
 mod api;
@@ -42,6 +43,7 @@ pub enum Message {
     ChatStreamStart(Ulid, api::ChatMessageResponseStream),
     ChatStream(Ulid, api::ChatMessageResponse),
     ChatStreamFinished(Ulid),
+    CopyClipboard(Arc<String>),
 }
 
 fn main() -> iced::Result {
@@ -179,7 +181,6 @@ impl ThinkMate {
             }
             Message::ChatStreamFinished(ulid) => {
                 if let Some(chat) = self.main.find_chat_mut(ulid) {
-                    println!("finish generating");
                     match &mut chat.state {
                         ChatState::Prompting(_) => {}
                         ChatState::Generate {
@@ -188,7 +189,8 @@ impl ThinkMate {
                             output: _,
                             ended_at,
                         } => {
-                            *ended_at = Some(SystemTime::now());
+                            let time = SystemTime::now();
+                            *ended_at = Some(time);
                         }
                     }
                 }
@@ -198,6 +200,7 @@ impl ThinkMate {
                 self.main.sidebar_visibility = self.main.sidebar_visibility.toggle();
                 Task::none()
             }
+            Message::CopyClipboard(s) => iced::clipboard::write(s.as_str().to_string()),
         }
     }
 
