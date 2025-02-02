@@ -43,7 +43,7 @@ impl Sidebar {
                 .push(
                     column![]
                         .push(text(format!("{}", date.format("%Y-%m-%d %H:%M:%S"))))
-                        .push(text(format!("{}", "a")).size(12.0))
+                        .push(text(format!("{}", "description")).size(12.0))
                         .spacing(5.0)
                         .width(Length::Fill),
                 )
