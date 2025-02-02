@@ -158,7 +158,7 @@ impl Chat {
 
 pub enum OutputMode {
     Text(Vec<iced::widget::markdown::Item>),
-    Code(String),
+    Code(String, iced::widget::text_editor::Content),
 }
 
 pub struct ChatOutput {
@@ -214,12 +214,16 @@ impl Chunk {
         if let Some((code_type, content)) = raw_content.split_once("\n") {
             Self {
                 raw_content: Arc::new(content.to_string()),
-                output_mode: OutputMode::Code(code_type.to_string()),
+                output_mode: OutputMode::Code(
+                    code_type.to_string(),
+                    iced::widget::text_editor::Content::with_text(content),
+                ),
             }
         } else {
+            let content = iced::widget::text_editor::Content::with_text(&raw_content);
             Self {
                 raw_content: Arc::new(raw_content),
-                output_mode: OutputMode::Code(String::new()),
+                output_mode: OutputMode::Code(String::new(), content),
             }
         }
     }
@@ -239,11 +243,12 @@ impl Chunk {
                 .map(Message::LinkClicked)
                 .into()
             }
-            OutputMode::Code(_code_type) => row![]
+            OutputMode::Code(_code_type, content) => row![]
                 .push(
                     button_icon(iced_fonts::Bootstrap::Clipboard)
                         .on_press(Message::CopyClipboard(self.raw_content.clone())),
                 )
+                /*
                 .push(container(
                     container(rich_text([
                         span(self.raw_content.as_str()).font(iced::Font::MONOSPACE)
@@ -251,6 +256,18 @@ impl Chunk {
                     .padding(5.0)
                     .style(|theme| container::bordered_box(theme)),
                 ))
+                */
+                .push(
+                    iced::widget::TextEditor::new(content)
+                        .style(|theme, style| {
+                            let mut style = iced::widget::text_editor::default(theme, style);
+                            style.background =
+                                iced::Background::Color(iced::Color::from_rgb8(0, 0, 0));
+                            style
+                        })
+                        .highlight(_code_type, iced::highlighter::Theme::InspiredGitHub)
+                        .font(iced::Font::MONOSPACE),
+                )
                 .spacing(10.0)
                 .into(),
         }

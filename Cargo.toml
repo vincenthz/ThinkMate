@@ -20,6 +20,7 @@ iced = { version = "0.13", features = [
     "advanced",
     "fira-sans",
     "markdown",
+    "highlighter",
 ] }
 iced_aw = { version = "0.11", default-features = false, features = ["spinner"] }
 iced_fonts = { version = "0.1", features = ["bootstrap", "nerd"] }
