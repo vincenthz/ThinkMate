@@ -1,20 +1,22 @@
-use std::{
-    sync::Arc,
-    time::{Duration, SystemTime},
-};
+use std::{sync::Arc, time::SystemTime};
 
 use chrono::{DateTime, Local};
 use iced::{
     widget::{column, container, row, scrollable, text, text_editor, Container},
-    Color, Element, Length, Padding,
+    Element, Length, Padding,
 };
 use ulid::Ulid;
 
-use crate::{api, helper::button_icon, Message};
+use crate::{
+    api,
+    helper::button_icon,
+    history::{Party, SavedChat},
+    Message,
+};
 
 pub struct Chat {
     pub ulid: Ulid,
-    pub model: api::LocalModel,
+    pub model: String,
     pub state: ChatState,
 }
 
@@ -24,16 +26,36 @@ pub enum ChatState {
         start: SystemTime,
         prompt: String,
         output: ChatOutput,
-        ended_at: Option<SystemTime>,
     },
+    Finished(SavedChat<ChatOutput>),
 }
 
 impl Chat {
     pub fn new(model: api::LocalModel) -> Self {
         Self {
             ulid: Ulid::new(),
-            model,
+            model: model.name().clone(),
             state: ChatState::Prompting(iced::widget::text_editor::Content::new()),
+        }
+    }
+
+    pub fn from_saved(chat: SavedChat<String>) -> Self {
+        Self {
+            ulid: chat.ulid.clone(),
+            model: chat.model.clone(),
+            state: ChatState::Finished(chat.to_chat_output()),
+        }
+    }
+
+    pub fn to_saved(&self) -> Option<SavedChat<String>> {
+        match &self.state {
+            ChatState::Prompting(_content) => None,
+            ChatState::Generate {
+                start: _,
+                prompt: _,
+                output: _,
+            } => None,
+            ChatState::Finished(saved_chat) => Some(saved_chat.clone().flatten_output()),
         }
     }
 
@@ -44,34 +66,50 @@ impl Chat {
         format!("Chat {}", date.format("%Y-%m-%d %H:%M:%S"))
     }
 
-    pub fn set_generating(&mut self) -> &str {
+    pub fn set_generating(&mut self) -> String {
         match &mut self.state {
             ChatState::Prompting(content) => {
                 let prompt = content.text();
                 self.state = ChatState::Generate {
                     start: SystemTime::now(),
-                    prompt,
+                    prompt: prompt.clone(),
                     output: ChatOutput::new(),
-                    ended_at: None,
                 };
-                match &self.state {
-                    ChatState::Prompting(_) => unreachable!(),
-                    ChatState::Generate {
-                        prompt,
-                        output: _,
-                        start: _,
-                        ended_at: _,
-                    } => prompt.as_str(),
-                }
+                prompt
             }
             ChatState::Generate {
                 prompt: _,
                 output: _,
-                ended_at: _,
                 start: _,
             } => {
                 tracing::error!("chat set generating in already generating mode");
-                ""
+                String::from("")
+            }
+            ChatState::Finished(_) => {
+                tracing::error!("chat set generating in finished mode");
+                String::from("")
+            }
+        }
+    }
+
+    pub fn set_finish(&mut self) {
+        match &self.state {
+            ChatState::Prompting(_content) => {
+                tracing::error!("set finish in prompting state")
+            }
+            ChatState::Generate {
+                start: _,
+                prompt,
+                output,
+            } => {
+                self.state = ChatState::Finished(SavedChat {
+                    ulid: self.ulid.clone(),
+                    model: self.model.clone(),
+                    content: vec![Party::Query(prompt.clone()), Party::Reply(output.clone())],
+                });
+            }
+            ChatState::Finished(_saved_chat) => {
+                tracing::error!("set finish in finished state")
             }
         }
     }
@@ -95,50 +133,44 @@ impl Chat {
             ChatState::Generate {
                 prompt,
                 output,
-                start,
-                ended_at,
-            } => {
-                let end_element = if let Some(ended_at) = ended_at {
-                    let duration = ended_at.duration_since(*start).unwrap_or(Duration::ZERO);
-                    Element::from(
-                        text(format!("generated in {} seconds", duration.as_secs()))
-                            .size(13.0)
-                            .color(Color::from_rgb8(0xa0, 0xa0, 0xa0)),
-                    )
-                } else {
-                    Element::from(iced_aw::Spinner::new())
-                };
+                start: _,
+            } => container(scrollable(
+                container(
+                    column![]
+                        .push(Self::view_prompt(prompt))
+                        .push(Self::view_output(output))
+                        .spacing(15.0),
+                )
+                .padding(Padding::from(5.0)),
+            )),
+            ChatState::Finished(saved_chat) => {
+                let chunks = saved_chat.content.iter().map(|p| match p {
+                    Party::Query(q) => Self::view_prompt(q).into(),
+                    Party::Reply(o) => Self::view_output(o).into(),
+                });
                 container(scrollable(
-                    container(
-                        column![]
-                            .push(
-                                container(
-                                    container(text(prompt))
-                                        .padding(Padding::default().left(5.0).right(5.0)),
-                                )
-                                .style(container::bordered_box)
-                                .center_x(Length::Fill)
-                                .padding(
-                                    Padding::default()
-                                        .top(5.0)
-                                        .bottom(5.0)
-                                        .left(30.0)
-                                        .right(30.0),
-                                ),
-                            )
-                            .push(output.view())
-                            .push(
-                                container(end_element)
-                                    .padding(Padding::default().top(5.0))
-                                    .center_x(Length::Fill),
-                            )
-                            .spacing(15.0),
-                    )
-                    .padding(Padding::from(5.0)),
+                    container(column(chunks).spacing(15.0)).padding(Padding::from(5.0)),
                 ))
             }
         }
         .padding(Padding::from(5.0))
+    }
+
+    fn view_prompt<'a>(prompt: &'a str) -> Container<'a, Message> {
+        container(container(text(prompt)).padding(Padding::default().left(5.0).right(5.0)))
+            .style(container::bordered_box)
+            .center_x(Length::Fill)
+            .padding(
+                Padding::default()
+                    .top(5.0)
+                    .bottom(5.0)
+                    .left(30.0)
+                    .right(30.0),
+            )
+    }
+
+    fn view_output<'a>(output: &'a ChatOutput) -> Container<'a, Message> {
+        output.view()
     }
 
     pub fn add_content(&mut self, response: api::ChatMessageResponse) {
@@ -150,17 +182,21 @@ impl Chat {
                 prompt: _,
                 output,
                 start: _,
-                ended_at: _,
-            } => output.add_content(response),
+            } => output.add_content(&response.message.content),
+            ChatState::Finished(_) => {
+                tracing::error!("chat message appended in finish mode")
+            }
         }
     }
 }
 
+#[derive(Clone)]
 pub enum OutputMode {
     Text(Vec<iced::widget::markdown::Item>),
-    Code(String, iced::widget::text_editor::Content),
+    Code(String, Arc<iced::widget::text_editor::Content>),
 }
 
+#[derive(Clone)]
 pub struct ChatOutput {
     stream: MarkdownIncremental,
     output: Vec<Chunk>,
@@ -174,28 +210,34 @@ impl ChatOutput {
         }
     }
 
+    pub fn raw(&self) -> String {
+        self.stream.buf.clone()
+    }
+
     fn unparsed(&self) -> &str {
         &self.stream.buf[self.stream.pos..]
     }
 
-    pub fn view(&self) -> Container<Message> {
+    pub fn view<'a>(&'a self) -> Container<'a, Message> {
         let rem = std::iter::once(text(self.unparsed()).into());
         container(column(self.output.iter().map(|c| c.view()).chain(rem)).spacing(20.0))
     }
 
-    pub fn add_content(&mut self, response: api::ChatMessageResponse) {
-        let msg = &response.message;
-        //println!("adding content: {:?} \"{}\"", msg.role, msg.content);
-
-        self.stream.add_content(&msg.content);
-        match self.stream.process_content() {
-            None => {}
-            Some(Content::Code(s)) => self.output.push(Chunk::new_code(s)),
-            Some(Content::Normal(s)) => self.output.push(Chunk::new(s)),
+    pub fn add_content(&mut self, message: &str) {
+        self.stream.add_content(message);
+        loop {
+            match self.stream.process_content() {
+                None => {
+                    break;
+                }
+                Some(Content::Code(s)) => self.output.push(Chunk::new_code(s)),
+                Some(Content::Normal(s)) => self.output.push(Chunk::new(s)),
+            }
         }
     }
 }
 
+#[derive(Clone)]
 pub struct Chunk {
     raw_content: Arc<String>,
     output_mode: OutputMode,
@@ -216,14 +258,14 @@ impl Chunk {
                 raw_content: Arc::new(content.to_string()),
                 output_mode: OutputMode::Code(
                     code_type.to_string(),
-                    iced::widget::text_editor::Content::with_text(content),
+                    Arc::new(iced::widget::text_editor::Content::with_text(content)),
                 ),
             }
         } else {
             let content = iced::widget::text_editor::Content::with_text(&raw_content);
             Self {
                 raw_content: Arc::new(raw_content),
-                output_mode: OutputMode::Code(String::new(), content),
+                output_mode: OutputMode::Code(String::new(), Arc::new(content)),
             }
         }
     }
@@ -265,6 +307,7 @@ impl Chunk {
     }
 }
 
+#[derive(Clone)]
 pub struct MarkdownIncremental {
     context: MarkdownContext,
     buf: String,

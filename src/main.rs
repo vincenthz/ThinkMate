@@ -1,6 +1,10 @@
-use std::time::{Duration, SystemTime};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use helper::{button_icon_small, button_icon_text};
+use history::{read_history, serialize_history, write_history, SavedChat};
 use iced::{
     font::{Family, Weight},
     widget::{
@@ -22,6 +26,7 @@ use url::Url;
 mod api;
 mod chat;
 mod helper;
+mod history;
 mod indicator;
 mod sidebar;
 mod utils;
@@ -45,6 +50,8 @@ pub enum Message {
     ChatStream(Ulid, api::ChatMessageResponse),
     ChatStreamFinished(Ulid),
     CopyClipboard(Arc<String>),
+    HistoryWritingResult(Result<(), String>),
+    HistorySelected(Ulid),
     LinkClicked(Url),
 }
 
@@ -52,6 +59,9 @@ fn main() -> iced::Result {
     let mut font = Font::with_name("Fira Sans");
     font.weight = Weight::Semibold;
     font.family = Family::SansSerif;
+
+    let project_dir = directories::ProjectDirs::from("io", "coretype", "ThinkMate").unwrap();
+
     let app = iced::application(ThinkMate::title, ThinkMate::update, ThinkMate::view)
         .theme(ThinkMate::theme)
         .font(iced_fonts::BOOTSTRAP_FONT_BYTES)
@@ -64,10 +74,11 @@ fn main() -> iced::Result {
         })
         .antialiasing(true)
         .subscription(ThinkMate::subscription);
-    app.run_with(|| ThinkMate::new())
+    app.run_with(move || ThinkMate::new(project_dir.config_dir()))
 }
 
 pub struct ThinkMate {
+    config_dir: PathBuf,
     ollama_config: api::OllamaConfig,
     menubar: Menubar,
     main: Main,
@@ -79,11 +90,14 @@ pub enum WorkerInput {
 }
 
 impl ThinkMate {
-    fn new() -> (Self, Task<Message>) {
+    fn new(config_dir: &Path) -> (Self, Task<Message>) {
+        std::fs::create_dir_all(config_dir).unwrap();
+        let history = read_history(config_dir);
         let me = Self {
+            config_dir: config_dir.to_path_buf(),
             ollama_config: api::OllamaConfig::localhost(api::DEFAULT_PORT),
             menubar: Menubar::new(),
-            main: Main::new(),
+            main: Main::new(history),
             worker: None,
         };
         (me, Task::none())
@@ -91,6 +105,15 @@ impl ThinkMate {
 
     fn set_models(&mut self, models: Vec<api::LocalModel>) {
         self.menubar.set_models(models);
+    }
+
+    fn add_history(&mut self, chat: SavedChat<String>) -> Task<Message> {
+        self.main.sidebar.add_chat(chat);
+        let history = serialize_history(&self.main.sidebar.chats);
+        let config_dir = self.config_dir.clone();
+        Task::perform(write_history(config_dir, history), |r| {
+            Message::HistoryWritingResult(r.map_err(|e| format!("{}", e)))
+        })
     }
 
     fn set_connected(&mut self, connected: bool) {
@@ -144,8 +167,8 @@ impl ThinkMate {
                         start: _,
                         prompt: _,
                         output: _,
-                        ended_at: _,
                     } => {}
+                    ChatState::Finished(_) => {}
                 };
                 Task::none()
             }
@@ -157,7 +180,7 @@ impl ThinkMate {
             Message::ChatSend => {
                 let chat = &mut self.main.tabs[self.main.chat_view];
                 let ulid = chat.ulid.clone();
-                let model = chat.model.name().clone();
+                let model = chat.model.clone();
                 let prompt = chat.set_generating().to_string();
                 let config = &self.ollama_config.clone();
                 let api = config.instance();
@@ -182,21 +205,18 @@ impl ThinkMate {
                 }
             }
             Message::ChatStreamFinished(ulid) => {
-                if let Some(chat) = self.main.find_chat_mut(ulid) {
-                    match &mut chat.state {
-                        ChatState::Prompting(_) => {}
-                        ChatState::Generate {
-                            start: _,
-                            prompt: _,
-                            output: _,
-                            ended_at,
-                        } => {
-                            let time = SystemTime::now();
-                            *ended_at = Some(time);
-                        }
-                    }
+                let to_save = if let Some(chat) = self.main.find_chat_mut(ulid) {
+                    chat.set_finish();
+                    let saved = chat.to_saved().unwrap();
+                    Some(saved.clone())
+                } else {
+                    None
+                };
+                if let Some(to_save) = to_save {
+                    self.add_history(to_save)
+                } else {
+                    Task::none()
                 }
-                Task::none()
             }
             Message::SidebarVisibilityToggle => {
                 self.main.sidebar_visibility = self.main.sidebar_visibility.toggle();
@@ -204,6 +224,28 @@ impl ThinkMate {
             }
             Message::CopyClipboard(s) => iced::clipboard::write(s.as_str().to_string()),
             Message::LinkClicked(_) => Task::none(),
+            Message::HistoryWritingResult(r) => match r {
+                Ok(()) => Task::none(),
+                Err(e) => {
+                    println!("fail saving history {}", e);
+                    Task::none()
+                }
+            },
+            Message::HistorySelected(ulid) => {
+                if let Some(saved_chat) = self
+                    .main
+                    .sidebar
+                    .chats
+                    .iter()
+                    .find(|c| c.ulid == ulid)
+                    .map(|c| c.clone())
+                {
+                    self.main.add_saved(saved_chat);
+                    Task::none()
+                } else {
+                    Task::none()
+                }
+            }
         }
     }
 
@@ -362,12 +404,12 @@ impl SidebarVisibility {
 }
 
 impl Main {
-    pub fn new() -> Self {
+    pub fn new(chats: Vec<SavedChat<String>>) -> Self {
         Self {
             home: EmptyChats::new(),
             chat_view: 0,
             tabs: vec![],
-            sidebar: Sidebar::new(),
+            sidebar: Sidebar::new(chats),
             sidebar_visibility: SidebarVisibility::default(),
         }
     }
@@ -434,6 +476,10 @@ impl Main {
 
     pub fn add_new(&mut self, model: api::LocalModel) {
         self.tabs.push(Chat::new(model))
+    }
+
+    pub fn add_saved(&mut self, saved_chat: SavedChat<String>) {
+        self.tabs.push(Chat::from_saved(saved_chat))
     }
 
     pub fn find_chat(&self, ulid: Ulid) -> Option<&Chat> {
