@@ -122,7 +122,17 @@ impl Chat {
                         .push(
                             text_editor(&content)
                                 .placeholder("Type something here...")
-                                .on_action(Message::ChatEditPrompt),
+                                .on_action(Message::ChatEditPrompt)
+                                .key_binding(|key_press| match key_press.key.as_ref() {
+                                    iced::keyboard::Key::Named(
+                                        iced::keyboard::key::Named::Enter,
+                                    ) if key_press.modifiers.command() => {
+                                        Some(iced::widget::text_editor::Binding::Custom(
+                                            Message::ChatSend,
+                                        ))
+                                    }
+                                    _ => text_editor::Binding::from_key_press(key_press),
+                                }),
                         )
                         .push(button_icon(iced_fonts::Bootstrap::Send).on_press_maybe(
                             (!content.text().is_empty()).then_some(Message::ChatSend),
