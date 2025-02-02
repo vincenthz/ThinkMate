@@ -5,7 +5,7 @@ use std::{
 
 use chrono::{DateTime, Local};
 use iced::{
-    widget::{column, container, rich_text, row, scrollable, span, text, text_editor, Container},
+    widget::{column, container, row, scrollable, text, text_editor, Container},
     Color, Element, Length, Padding,
 };
 use ulid::Ulid;
@@ -248,15 +248,6 @@ impl Chunk {
                     button_icon(iced_fonts::Bootstrap::Clipboard)
                         .on_press(Message::CopyClipboard(self.raw_content.clone())),
                 )
-                /*
-                .push(container(
-                    container(rich_text([
-                        span(self.raw_content.as_str()).font(iced::Font::MONOSPACE)
-                    ]))
-                    .padding(5.0)
-                    .style(|theme| container::bordered_box(theme)),
-                ))
-                */
                 .push(
                     iced::widget::TextEditor::new(content)
                         .style(|theme, style| {
