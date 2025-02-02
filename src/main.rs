@@ -52,6 +52,7 @@ pub enum Message {
     CopyClipboard(Arc<String>),
     HistoryWritingResult(Result<(), String>),
     HistorySelected(Ulid),
+    HistoryDelete(Ulid),
     LinkClicked(Url),
 }
 
@@ -107,13 +108,17 @@ impl ThinkMate {
         self.menubar.set_models(models);
     }
 
-    fn add_history(&mut self, chat: SavedChat<String>) -> Task<Message> {
-        self.main.sidebar.add_chat(chat);
+    fn write_history(&self) -> Task<Message> {
         let history = serialize_history(&self.main.sidebar.chats);
         let config_dir = self.config_dir.clone();
         Task::perform(write_history(config_dir, history), |r| {
             Message::HistoryWritingResult(r.map_err(|e| format!("{}", e)))
         })
+    }
+
+    fn add_history(&mut self, chat: SavedChat<String>) -> Task<Message> {
+        self.main.sidebar.add_chat(chat);
+        self.write_history()
     }
 
     fn set_connected(&mut self, connected: bool) {
@@ -242,6 +247,13 @@ impl ThinkMate {
                 {
                     self.main.add_saved(saved_chat);
                     Task::none()
+                } else {
+                    Task::none()
+                }
+            }
+            Message::HistoryDelete(ulid) => {
+                if self.main.sidebar.remove_chat(ulid) {
+                    self.write_history()
                 } else {
                     Task::none()
                 }
