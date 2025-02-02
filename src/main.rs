@@ -237,6 +237,11 @@ impl ThinkMate {
                 }
             },
             Message::HistorySelected(ulid) => {
+                // check if the chat is already opened
+                if let Some(chat_idx) = self.main.find_chat_position(ulid) {
+                    self.main.chat_view = chat_idx;
+                    return Task::none();
+                }
                 if let Some(saved_chat) = self
                     .main
                     .sidebar
@@ -492,6 +497,10 @@ impl Main {
 
     pub fn add_saved(&mut self, saved_chat: SavedChat<String>) {
         self.tabs.push(Chat::from_saved(saved_chat))
+    }
+
+    pub fn find_chat_position(&self, ulid: Ulid) -> Option<usize> {
+        self.tabs.iter().position(|chat| chat.ulid == ulid)
     }
 
     pub fn find_chat(&self, ulid: Ulid) -> Option<&Chat> {
