@@ -157,7 +157,7 @@ impl Chat {
 }
 
 pub enum OutputMode {
-    Text,
+    Text(Vec<iced::widget::markdown::Item>),
     Code(String),
 }
 
@@ -203,9 +203,10 @@ pub struct Chunk {
 
 impl Chunk {
     pub fn new(raw_content: String) -> Self {
+        let items = iced::widget::markdown::parse(&raw_content).collect();
         Self {
             raw_content: Arc::new(raw_content),
-            output_mode: OutputMode::Text,
+            output_mode: OutputMode::Text(items),
         }
     }
 
@@ -225,7 +226,19 @@ impl Chunk {
 
     pub fn view<'a>(&'a self) -> Element<'a, Message> {
         match &self.output_mode {
-            OutputMode::Text => rich_text([span(self.raw_content.as_str())]).into(),
+            OutputMode::Text(items) =>
+            //rich_text([span(self.raw_content.as_str())]).into(),
+            {
+                iced::widget::markdown(
+                    items,
+                    iced::widget::markdown::Settings::default(),
+                    iced::widget::markdown::Style::from_palette(
+                        iced::Theme::TokyoNightStorm.palette(),
+                    ),
+                )
+                .map(Message::LinkClicked)
+                .into()
+            }
             OutputMode::Code(_code_type) => row![]
                 .push(
                     button_icon(iced_fonts::Bootstrap::Clipboard)

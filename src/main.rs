@@ -17,6 +17,7 @@ use iced::stream;
 use sidebar::Sidebar;
 use std::sync::Arc;
 use ulid::Ulid;
+use url::Url;
 
 mod api;
 mod chat;
@@ -44,6 +45,7 @@ pub enum Message {
     ChatStream(Ulid, api::ChatMessageResponse),
     ChatStreamFinished(Ulid),
     CopyClipboard(Arc<String>),
+    LinkClicked(Url),
 }
 
 fn main() -> iced::Result {
@@ -201,6 +203,7 @@ impl ThinkMate {
                 Task::none()
             }
             Message::CopyClipboard(s) => iced::clipboard::write(s.as_str().to_string()),
+            Message::LinkClicked(_) => Task::none(),
         }
     }
 

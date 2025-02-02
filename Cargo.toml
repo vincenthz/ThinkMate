@@ -6,8 +6,8 @@ license = "MIT"
 authors = ["Vincent Hanquez <vincent@coretype.io>"]
 homepage = "https://github.com/vincenthz/ThinkMate/"
 repository = "https://github.com/vincenthz/ThinkMate/"
-keywords = [ "AI", "Ollama", "Frontend" ]
-categories = [ "ui" ]
+keywords = ["AI", "Ollama", "Frontend"]
+categories = ["ui"]
 rust-version = "1.78"
 
 [dependencies]
@@ -19,6 +19,7 @@ iced = { version = "0.13", features = [
     "image",
     "advanced",
     "fira-sans",
+    "markdown",
 ] }
 iced_aw = { version = "0.11", default-features = false, features = ["spinner"] }
 iced_fonts = { version = "0.1", features = ["bootstrap", "nerd"] }
