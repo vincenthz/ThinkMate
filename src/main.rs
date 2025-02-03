@@ -168,12 +168,7 @@ impl ThinkMate {
                 let chat = &mut self.main.tabs[self.main.chat_view];
                 match &mut chat.state {
                     ChatState::Prompting(content) => content.perform(text_action),
-                    ChatState::Generate {
-                        start: _,
-                        prompt: _,
-                        output: _,
-                    } => {}
-                    ChatState::Finished(_) => {}
+                    ChatState::Generating(_) => {}
                 };
                 Task::none()
             }
@@ -184,8 +179,8 @@ impl ThinkMate {
             }
             Message::ChatSend => {
                 let chat = &mut self.main.tabs[self.main.chat_view];
-                let ulid = chat.ulid.clone();
-                let model = chat.model.clone();
+                let ulid = chat.ulid();
+                let model = chat.model();
                 let prompt = chat.set_generating().to_string();
                 let config = &self.ollama_config.clone();
                 let api = config.instance();
@@ -212,7 +207,7 @@ impl ThinkMate {
             Message::ChatStreamFinished(ulid) => {
                 let to_save = if let Some(chat) = self.main.find_chat_mut(ulid) {
                     chat.set_finish();
-                    let saved = chat.to_saved().unwrap();
+                    let saved = chat.to_saved();
                     Some(saved.clone())
                 } else {
                     None
@@ -500,15 +495,15 @@ impl Main {
     }
 
     pub fn find_chat_position(&self, ulid: Ulid) -> Option<usize> {
-        self.tabs.iter().position(|chat| chat.ulid == ulid)
+        self.tabs.iter().position(|chat| chat.ulid() == ulid)
     }
 
     pub fn find_chat(&self, ulid: Ulid) -> Option<&Chat> {
-        self.tabs.iter().find(|chat| chat.ulid == ulid)
+        self.tabs.iter().find(|chat| chat.ulid() == ulid)
     }
 
     pub fn find_chat_mut(&mut self, ulid: Ulid) -> Option<&mut Chat> {
-        self.tabs.iter_mut().find(|chat| chat.ulid == ulid)
+        self.tabs.iter_mut().find(|chat| chat.ulid() == ulid)
     }
 }
 

@@ -15,52 +15,71 @@ use crate::{
 };
 
 pub struct Chat {
-    pub ulid: Ulid,
-    pub model: String,
+    pub previous: SavedChat<ChatOutput>,
     pub state: ChatState,
 }
 
 pub enum ChatState {
     Prompting(iced::widget::text_editor::Content),
-    Generate {
-        start: SystemTime,
-        prompt: String,
-        output: ChatOutput,
-    },
-    Finished(SavedChat<ChatOutput>),
+    Generating(ChatGenerating),
+}
+
+impl Default for ChatState {
+    fn default() -> Self {
+        Self::Prompting(iced::widget::text_editor::Content::new())
+    }
+}
+
+pub struct ChatGenerating {
+    prompt: String,
+    start: SystemTime,
+    output: ChatOutput,
+}
+
+impl ChatGenerating {
+    fn new(prompt: String) -> Self {
+        Self {
+            prompt,
+            start: SystemTime::now(),
+            output: ChatOutput::new(),
+        }
+    }
 }
 
 impl Chat {
     pub fn new(model: api::LocalModel) -> Self {
         Self {
-            ulid: Ulid::new(),
-            model: model.name().clone(),
-            state: ChatState::Prompting(iced::widget::text_editor::Content::new()),
+            previous: SavedChat {
+                ulid: Ulid::new(),
+                model: model.name().clone(),
+                content: vec![],
+            },
+            state: ChatState::default(),
         }
+    }
+
+    pub fn ulid(&self) -> Ulid {
+        self.previous.ulid
+    }
+
+    pub fn model(&self) -> String {
+        self.previous.model.clone()
     }
 
     pub fn from_saved(chat: SavedChat<String>) -> Self {
+        let previous = chat.to_chat_output();
         Self {
-            ulid: chat.ulid.clone(),
-            model: chat.model.clone(),
-            state: ChatState::Finished(chat.to_chat_output()),
+            previous,
+            state: ChatState::default(),
         }
     }
 
-    pub fn to_saved(&self) -> Option<SavedChat<String>> {
-        match &self.state {
-            ChatState::Prompting(_content) => None,
-            ChatState::Generate {
-                start: _,
-                prompt: _,
-                output: _,
-            } => None,
-            ChatState::Finished(saved_chat) => Some(saved_chat.clone().flatten_output()),
-        }
+    pub fn to_saved(&self) -> SavedChat<String> {
+        self.previous.clone().flatten_output()
     }
 
     pub fn name(&self) -> String {
-        let time = self.ulid.datetime();
+        let time = self.previous.ulid.datetime();
         let date: DateTime<Local> = time.clone().into();
 
         format!("Chat {}", date.format("%Y-%m-%d %H:%M:%S"))
@@ -68,102 +87,90 @@ impl Chat {
 
     pub fn set_generating(&mut self) -> String {
         match &mut self.state {
-            ChatState::Prompting(content) => {
-                let prompt = content.text();
-                self.state = ChatState::Generate {
-                    start: SystemTime::now(),
-                    prompt: prompt.clone(),
-                    output: ChatOutput::new(),
-                };
+            ChatState::Prompting(prompt) => {
+                let prompt = prompt.text();
+                self.state = ChatState::Generating(ChatGenerating::new(prompt.clone()));
                 prompt
             }
-            ChatState::Generate {
-                prompt: _,
-                output: _,
-                start: _,
-            } => {
-                tracing::error!("chat set generating in already generating mode");
-                String::from("")
-            }
-            ChatState::Finished(_) => {
-                tracing::error!("chat set generating in finished mode");
-                String::from("")
+            ChatState::Generating(_) => {
+                tracing::error!("set generating in already generating mode");
+                String::new()
             }
         }
     }
 
     pub fn set_finish(&mut self) {
-        match &self.state {
-            ChatState::Prompting(_content) => {
-                tracing::error!("set finish in prompting state")
+        let mut prev_state = ChatState::default();
+        std::mem::swap(&mut prev_state, &mut self.state);
+        match prev_state {
+            ChatState::Prompting(content) => {
+                tracing::error!("set finish in already prompting mode");
+                // put back the previous state
+                self.state = ChatState::Prompting(content);
             }
-            ChatState::Generate {
-                start: _,
-                prompt,
-                output,
-            } => {
-                self.state = ChatState::Finished(SavedChat {
-                    ulid: self.ulid.clone(),
-                    model: self.model.clone(),
-                    content: vec![Party::Query(prompt.clone()), Party::Reply(output.clone())],
-                });
-            }
-            ChatState::Finished(_saved_chat) => {
-                tracing::error!("set finish in finished state")
+            ChatState::Generating(generating) => {
+                self.previous.content.push(Party::Query(generating.prompt));
+                self.previous.content.push(Party::Reply(generating.output));
             }
         }
     }
 
     pub fn view(&self) -> Container<Message> {
-        match &self.state {
-            ChatState::Prompting(content) => container(
-                column![].push(
-                    row![]
-                        .push(
-                            text_editor(&content)
-                                .placeholder("Type something here...")
-                                .on_action(Message::ChatEditPrompt)
-                                .key_binding(|key_press| match key_press.key.as_ref() {
-                                    iced::keyboard::Key::Named(
-                                        iced::keyboard::key::Named::Enter,
-                                    ) if key_press.modifiers.command() => {
-                                        Some(iced::widget::text_editor::Binding::Custom(
-                                            Message::ChatSend,
-                                        ))
-                                    }
-                                    _ => text_editor::Binding::from_key_press(key_press),
-                                }),
-                        )
-                        .push(button_icon(iced_fonts::Bootstrap::Send).on_press_maybe(
-                            (!content.text().is_empty()).then_some(Message::ChatSend),
-                        ))
-                        .spacing(5.0),
-                ),
+        let previous_chunks = self.previous.content.iter().map(|p| match p {
+            Party::Query(q) => Self::view_prompt(q).into(),
+            Party::Reply(o) => Self::view_output(o).into(),
+        });
+
+        let chunks: Box<dyn Iterator<Item = Element<'_, Message>> + '_> = match &self.state {
+            ChatState::Prompting(content) => Box::new(
+                previous_chunks.chain(std::iter::once(Self::view_prompt_editor(&content).into())),
             ),
-            ChatState::Generate {
-                prompt,
-                output,
-                start: _,
-            } => container(scrollable(
-                container(
-                    column![]
-                        .push(Self::view_prompt(prompt))
-                        .push(Self::view_output(output))
-                        .spacing(15.0),
-                )
-                .padding(Padding::from(5.0)),
-            )),
-            ChatState::Finished(saved_chat) => {
-                let chunks = saved_chat.content.iter().map(|p| match p {
-                    Party::Query(q) => Self::view_prompt(q).into(),
-                    Party::Reply(o) => Self::view_output(o).into(),
-                });
-                container(scrollable(
-                    container(column(chunks).spacing(15.0)).padding(Padding::from(5.0)),
-                ))
-            }
-        }
+            ChatState::Generating(chat_generating) => Box::new(
+                previous_chunks
+                    .chain(std::iter::once(
+                        Self::view_prompt(&chat_generating.prompt).into(),
+                    ))
+                    .chain(std::iter::once(
+                        Self::view_output(&chat_generating.output).into(),
+                    )),
+            ),
+        };
+        container(
+            scrollable(
+                container(column(chunks).spacing(15.0))
+                    .padding(Padding::default().left(10.0).right(20.0)),
+            )
+            .anchor_bottom(),
+        )
         .padding(Padding::from(5.0))
+    }
+
+    fn view_prompt_editor<'a>(
+        content: &'a iced::widget::text_editor::Content,
+    ) -> Container<'a, Message> {
+        container(
+            row![]
+                .push(
+                    text_editor(&content)
+                        .placeholder("Type something here...")
+                        .on_action(Message::ChatEditPrompt)
+                        .key_binding(|key_press| match key_press.key.as_ref() {
+                            iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter)
+                                if key_press.modifiers.command() =>
+                            {
+                                Some(iced::widget::text_editor::Binding::Custom(
+                                    Message::ChatSend,
+                                ))
+                            }
+                            _ => text_editor::Binding::from_key_press(key_press),
+                        }),
+                )
+                .push(
+                    button_icon(iced_fonts::Bootstrap::Send)
+                        .on_press_maybe((!content.text().is_empty()).then_some(Message::ChatSend)),
+                )
+                .spacing(5.0),
+        )
     }
 
     fn view_prompt<'a>(prompt: &'a str) -> Container<'a, Message> {
@@ -188,13 +195,8 @@ impl Chat {
             ChatState::Prompting(_) => {
                 tracing::error!("chat message appended in prompt mode")
             }
-            ChatState::Generate {
-                prompt: _,
-                output,
-                start: _,
-            } => output.add_content(&response.message.content),
-            ChatState::Finished(_) => {
-                tracing::error!("chat message appended in finish mode")
+            ChatState::Generating(generating) => {
+                generating.output.add_content(&response.message.content)
             }
         }
     }
@@ -282,19 +284,13 @@ impl Chunk {
 
     pub fn view<'a>(&'a self) -> Element<'a, Message> {
         match &self.output_mode {
-            OutputMode::Text(items) =>
-            //rich_text([span(self.raw_content.as_str())]).into(),
-            {
-                iced::widget::markdown(
-                    items,
-                    iced::widget::markdown::Settings::default(),
-                    iced::widget::markdown::Style::from_palette(
-                        iced::Theme::TokyoNightStorm.palette(),
-                    ),
-                )
-                .map(Message::LinkClicked)
-                .into()
-            }
+            OutputMode::Text(items) => iced::widget::markdown(
+                items,
+                iced::widget::markdown::Settings::default(),
+                iced::widget::markdown::Style::from_palette(iced::Theme::TokyoNightStorm.palette()),
+            )
+            .map(Message::LinkClicked)
+            .into(),
             OutputMode::Code(_code_type, content) => row![]
                 .push(
                     button_icon(iced_fonts::Bootstrap::Clipboard)
@@ -356,7 +352,7 @@ impl MarkdownIncremental {
     fn process_content(&mut self) -> Option<Content> {
         let remaining = &self.buf[self.pos..];
         match self.context {
-            MarkdownContext::Normal => match next_chunk(remaining) {
+            MarkdownContext::Normal => match normal_next_chunk(remaining) {
                 None => None,
                 Some(ContentFound::NewParagraph(idx)) => {
                     let s = &self.buf[self.pos..self.pos + idx];
@@ -383,7 +379,8 @@ impl MarkdownIncremental {
     }
 }
 
-fn next_chunk(s: &str) -> Option<ContentFound> {
+// find either a double newline or a triple backquote, whichever comes first
+fn normal_next_chunk(s: &str) -> Option<ContentFound> {
     let z1 = s.find("```");
     let z2 = s.find("\n\n");
     match (z1, z2) {
