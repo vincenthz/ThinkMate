@@ -206,7 +206,16 @@ impl Chat {
 
     fn view_prompt<'a>(prompt: &'a str) -> Container<'a, Message> {
         container(container(text(prompt)).padding(Padding::default().left(5.0).right(5.0)))
-            .style(container::bordered_box)
+            .style(|theme: &iced::Theme| {
+                let palette = theme.extended_palette();
+
+                container::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgb8(50, 180, 30))),
+                    text_color: Some(palette.background.weak.text),
+                    border: iced::border::rounded(10),
+                    ..container::Style::default()
+                }
+            })
             .center_x(Length::Fill)
             .padding(
                 Padding::default()
