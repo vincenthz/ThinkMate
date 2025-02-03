@@ -2,8 +2,11 @@ use std::{sync::Arc, time::SystemTime};
 
 use chrono::{DateTime, Local};
 use iced::{
-    widget::{column, container, row, scrollable, text, text_editor, Container},
-    Element, Length, Padding,
+    widget::{
+        column, container, horizontal_rule, horizontal_space, row, scrollable, text, text_editor,
+        Container,
+    },
+    Alignment, Element, Length, Padding,
 };
 use ulid::Ulid;
 
@@ -135,12 +138,40 @@ impl Chat {
                     )),
             ),
         };
+        let mut menu = row![]
+            .spacing(5.0)
+            .align_y(Alignment::Center)
+            .push(text(format!("using {}", self.model())));
+
+        match &self.state {
+            ChatState::Prompting(_) => {}
+            ChatState::Generating(generating) => {
+                let current = SystemTime::now();
+                let s = current
+                    .duration_since(generating.start)
+                    .unwrap_or(std::time::Duration::ZERO);
+                menu = menu.push(horizontal_space());
+                menu = menu.push(text(format!("generating {} seconds", s.as_secs())));
+                menu = menu.push(iced_aw::Spinner::new());
+            }
+        };
         container(
-            scrollable(
-                container(column(chunks).spacing(15.0))
-                    .padding(Padding::default().left(10.0).right(20.0)),
-            )
-            .anchor_bottom(),
+            column![]
+                .push(
+                    container(menu)
+                        .style(|theme| container::bordered_box(theme))
+                        .width(Length::Fill)
+                        .padding(5.0), //.height(30.0),
+                )
+                .push(horizontal_rule(1.0))
+                .push(
+                    scrollable(
+                        container(column(chunks).spacing(15.0))
+                            .padding(Padding::default().left(10.0).right(20.0)),
+                    )
+                    .anchor_bottom(),
+                )
+                .spacing(15.0),
         )
         .padding(Padding::from(5.0))
     }
