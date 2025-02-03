@@ -61,6 +61,17 @@ impl Chat {
         }
     }
 
+    pub fn description(&self) -> String {
+        if self.previous.content.is_empty() {
+            String::new()
+        } else {
+            match &self.previous.content[0] {
+                Party::Query(p) => p.chars().take(40).collect::<String>(),
+                Party::Reply(_) => String::new(),
+            }
+        }
+    }
+
     pub fn ulid(&self) -> Ulid {
         self.previous.ulid
     }

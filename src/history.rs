@@ -67,6 +67,17 @@ impl SavedChat<String> {
             content,
         }
     }
+
+    pub fn description(&self) -> String {
+        if self.content.is_empty() {
+            String::new()
+        } else {
+            match &self.content[0] {
+                Party::Query(p) => p.chars().take(40).collect::<String>(),
+                Party::Reply(_) => String::new(),
+            }
+        }
+    }
 }
 
 impl SavedChat<ChatOutput> {
