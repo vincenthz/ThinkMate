@@ -42,8 +42,8 @@ pub enum Message {
     Disconnected,
     NewChat(api::LocalModel),
     SidebarVisibilityToggle,
-    ChatClosed(usize),
-    ChatSelected(usize),
+    ChatClosed(Ulid),
+    ChatSelected(Ulid),
     ChatEditPrompt(iced::widget::text_editor::Action),
     ChatSend,
     ChatStreamStart(Ulid, api::ChatMessageResponseStream),
@@ -161,7 +161,11 @@ impl ThinkMate {
                 Task::none()
             }
             Message::ChatClosed(chat_closing) => {
-                self.main.tabs.remove(chat_closing);
+                if let Some(idx) = self.main.find_chat_position(chat_closing) {
+                    self.main.tabs.remove(idx);
+                } else {
+                    tracing::error!("cannot remove chat {} that doesn't exist", chat_closing)
+                }
                 Task::none()
             }
             Message::ChatEditPrompt(text_action) => {
@@ -173,8 +177,11 @@ impl ThinkMate {
                 Task::none()
             }
             Message::ChatSelected(chat_selected) => {
-                println!("chat selected {}", chat_selected);
-                self.main.chat_view = chat_selected;
+                if let Some(idx) = self.main.find_chat_position(chat_selected) {
+                    self.main.chat_view = idx;
+                } else {
+                    tracing::error!("cannot select chat {} that doesn't exist", chat_selected)
+                }
                 Task::none()
             }
             Message::ChatSend => {
@@ -441,7 +448,7 @@ impl Main {
                     let close = button_icon_small(iced_fonts::Bootstrap::X)
                         .padding(1.0)
                         .style(|theme, status| button::danger(theme, status))
-                        .on_press(Message::ChatClosed(i));
+                        .on_press(Message::ChatClosed(chat.ulid()));
                     button(
                         row![]
                             .push(label)
@@ -449,7 +456,7 @@ impl Main {
                             .spacing(10.0)
                             .align_y(Alignment::Center),
                     )
-                    .on_press(Message::ChatSelected(i))
+                    .on_press(Message::ChatSelected(chat.ulid()))
                     .style(move |theme, status| {
                         if selected {
                             button::primary(theme, status)
