@@ -19,8 +19,10 @@ pub enum Party<T> {
     Reply(T),
 }
 
+const HISTORY_FILE_NAME: &str = "history.json";
+
 pub fn read_history(path: &Path) -> Vec<SavedChat<String>> {
-    let path = path.to_path_buf().join("history.json");
+    let path = path.to_path_buf().join(HISTORY_FILE_NAME);
 
     let Ok(file) = std::fs::File::open(&path) else {
         return vec![];
@@ -38,7 +40,7 @@ pub fn serialize_history(chats: &[SavedChat<String>]) -> String {
 }
 
 pub async fn write_history(path: PathBuf, chats: String) -> std::io::Result<()> {
-    let path = path.join("history.json");
+    let path = path.join(HISTORY_FILE_NAME);
     let tmp_path = path.clone().with_extension(".json.tmp");
 
     let mut file = tokio::fs::File::create(&tmp_path).await?;

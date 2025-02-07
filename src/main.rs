@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-use helper::{button_icon_small, button_icon_text};
+use helper::{button_icon, button_icon_small, button_icon_text, dialog};
 use history::{read_history, serialize_history, write_history, SavedChat};
 use iced::{
     font::{Family, Weight},
@@ -28,6 +28,7 @@ mod chat;
 mod helper;
 mod history;
 mod indicator;
+mod settings;
 mod sidebar;
 mod utils;
 
@@ -35,6 +36,9 @@ use chat::{Chat, ChatState};
 
 #[derive(Clone, Debug)]
 pub enum Message {
+    SettingsClicked,
+    SettingsChanged(settings::MessageSettings),
+    SettingsClosed,
     ModelSelected(api::LocalModel),
     WorkerReady(mpsc::Sender<WorkerInput>),
     Connected,
@@ -50,6 +54,7 @@ pub enum Message {
     ChatStream(Ulid, api::ChatMessageResponse),
     ChatStreamFinished(Ulid),
     CopyClipboard(Arc<String>),
+    ConfigWritingResult(Result<(), String>),
     HistoryWritingResult(Result<(), String>),
     HistorySelected(Ulid),
     HistoryDelete(Ulid),
@@ -84,6 +89,8 @@ pub struct ThinkMate {
     menubar: Menubar,
     main: Main,
     worker: Option<mpsc::Sender<WorkerInput>>,
+    settings: settings::Settings,
+    show_settings: bool,
 }
 
 pub enum WorkerInput {
@@ -94,12 +101,16 @@ impl ThinkMate {
     fn new(config_dir: &Path) -> (Self, Task<Message>) {
         std::fs::create_dir_all(config_dir).unwrap();
         let history = read_history(config_dir);
+
+        let settings = settings::read_settings(config_dir).unwrap_or(settings::Settings::default());
         let me = Self {
+            settings,
             config_dir: config_dir.to_path_buf(),
             ollama_config: api::OllamaConfig::localhost(api::DEFAULT_PORT),
             menubar: Menubar::new(),
             main: Main::new(history),
             worker: None,
+            show_settings: false,
         };
         (me, Task::none())
     }
@@ -113,6 +124,14 @@ impl ThinkMate {
         let config_dir = self.config_dir.clone();
         Task::perform(write_history(config_dir, history), |r| {
             Message::HistoryWritingResult(r.map_err(|e| format!("{}", e)))
+        })
+    }
+
+    fn write_config(&self) -> Task<Message> {
+        let settings = settings::serialize_settings(&self.settings);
+        let config_dir = self.config_dir.clone();
+        Task::perform(settings::write_config(config_dir, settings), |r| {
+            Message::ConfigWritingResult(r.map_err(|e| format!("{}", e)))
         })
     }
 
@@ -231,6 +250,13 @@ impl ThinkMate {
             }
             Message::CopyClipboard(s) => iced::clipboard::write(s.as_str().to_string()),
             Message::LinkClicked(_) => Task::none(),
+            Message::ConfigWritingResult(r) => match r {
+                Ok(()) => Task::none(),
+                Err(e) => {
+                    println!("fail saving config {}", e);
+                    Task::none()
+                }
+            },
             Message::HistoryWritingResult(r) => match r {
                 Ok(()) => Task::none(),
                 Err(e) => {
@@ -265,6 +291,18 @@ impl ThinkMate {
                     Task::none()
                 }
             }
+            Message::SettingsClicked => {
+                self.show_settings = true;
+                Task::none()
+            }
+            Message::SettingsClosed => {
+                self.show_settings = false;
+                Task::none()
+            }
+            Message::SettingsChanged(message_settings) => {
+                self.settings.update(message_settings);
+                self.write_config()
+            }
         }
     }
 
@@ -277,13 +315,20 @@ impl ThinkMate {
     }
 
     fn theme(&self) -> Theme {
-        // to not use darklight crate directly, rely on the default theme being Dark or Light.
-        let _system_use_dark = Theme::default() == Theme::Dark;
-        Theme::default()
+        match self.settings.theme {
+            settings::SettingsTheme::Light => Theme::CatppuccinLatte,
+            settings::SettingsTheme::Dark => Theme::CatppuccinFrappe,
+        }
     }
 
     fn view(&self) -> Container<Message> {
-        container(
+        let inside = if self.show_settings {
+            Element::from(dialog(
+                "Settings",
+                self.settings.view().map(Message::SettingsChanged),
+                Message::SettingsClosed,
+            ))
+        } else {
             column![]
                 .push(self.menubar.view().height(Length::Fixed(40.0)))
                 .push(
@@ -292,10 +337,10 @@ impl ThinkMate {
                         .height(Length::Fill)
                         .width(Length::Fill)
                         .padding(Padding::default().top(5.0).top(5.0)),
-                ),
-        )
-        .center(Length::Fill)
-        .padding(3)
+                )
+                .into()
+        };
+        container(inside).center(Length::Fill).padding(3)
     }
 }
 
@@ -359,13 +404,12 @@ impl Menubar {
         } else {
             Color::from_rgb8(0x9f, 0, 0)
         };
+        let mut title_font = iced::Font::DEFAULT;
+        title_font.weight = Weight::ExtraBold;
         container(
             row![]
-                .push(
-                    text("ThinkMate")
-                        .color(Color::from_rgb8(0x60, 0x0, 0x12))
-                        .size(20.0),
-                )
+                .push(button_icon(iced_fonts::Bootstrap::Gear).on_press(Message::SettingsClicked))
+                .push(text("ThinkMate").font(title_font).size(20.0))
                 .push(horizontal_space())
                 .push(
                     combo_box(
