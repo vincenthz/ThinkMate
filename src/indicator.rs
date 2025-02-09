@@ -10,7 +10,6 @@ use iced::{
     window, Border, Color, Element, Event, Length, Rectangle, Shadow, Size, Vector,
 };
 
-#[allow(missing_debug_implementations)]
 pub struct Indicator {
     width: Length,
     height: Length,
